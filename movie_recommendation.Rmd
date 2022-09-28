@@ -1,0 +1,553 @@
+---
+title: "Movie Recommendation System"
+author: "Norbert Hartkamp, M.D., M.Sc."
+date: "`r format(Sys.Date(), format='%d.%m.%Y')`"
+output:
+  bookdown::pdf_document2:
+    header-includes:
+      - \usepackage{float}
+      - \usepackage{xcolor} 
+    theme: spacelab
+    number_sections: yes
+    keep_tex: yes
+    toc: yes
+    fontsize: 11pt
+    geometry: margin=30mm
+    fig_caption: yes
+    extra_dependencies: flafter
+  bookdown::html_document2:
+    css: "html-style.css"
+    fig_caption: yes
+    keep_tex: yes
+    fontsize: 11pt
+---
+\hypersetup{colorlinks, citecolor=blue, filecolor=blue, linkcolor=blue, urlcolor=blue, pdftex}
+\renewcommand{\topfraction}{.85}
+\renewcommand{\bottomfraction}{.7}
+\renewcommand{\textfraction}{.15}
+\renewcommand{\floatpagefraction}{.66}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{3}
+\setcounter{totalnumber}{4}
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+# Executive Summary
+
+An analysis is done of the 10M subset of the **MoviLens** database with the aim of developing a predictive algorithm for movie ratings, based on a division of the original data set that serves as a *training* data set.
+
+The resulting algorithm is then tested against another, independent division from the original data set (*test* data).
+
+The final result demonstrates that by including several predictive markers in a simple model, a considerable gain in prediction accuracy can be achieved. 
+
+# Introduction and Overview
+
+As part of the HarvardX PH125.9x course on [*\textcolor{blue}{Data Science}*](https://www.edx.org/course/data-science-r-basics) this document attempts at working out a movie recommendation system. The system is based on the 10M-version the large **movielens**-database encompassing 10,000,054 ratings from 1/1995 to 1/2009, which was provided for this course by the edx-team. 
+
+I first will try to *describe* the data to some extent, and then to detect *patterns* regarding groups of *movies*, and *users*, and their respective *ratings*.
+
+I'll also take into account possible effects of movie-*genres* and of the *age of the movie at the time of rating*.
+
+## The MoviLens data
+The Movielens system has first been released 1998 by a team from the Univ. of Minnesota (cf. [\textcolor{blue}{Harper, F. M., \& Konstan, J. A. (2015). The movielens datasets: History and context. ACM tiis, 5(4), 1-19.}](https://dl.acm.org/doi/abs/10.1145/2827872)). The data that have been collected by MovieLens are a result of people interacting with an online movie-recommendation system, a process in which the users are required to input their movie preferences into the system.
+
+Although MovieLens was only launched in the fall of 1997 it includes ratings from before that time. Those ratings had been made with the predecessor of MoviLens, "EachMovie" by DEC. DEC had decided to discontinue their system, and transfered an anonymized dataset of ratings to the makers of MovieLens, who had already developed a community based rating and filtering machanism for usenet-articles ([\textcolor{blue}{Konstan, J. A., Miller, B. N., Maltz, D., Herlocker, J. L., Gordon, L. R., \& Riedl, J. (1997). Grouplens: Applying collaborative filtering to usenet news. Communications of the ACM, 40(3), 77-87.}](https://dl.acm.org/doi/pdf/10.1145/245108.245126)). 
+
+In MovieLens *collaborative filtering* has been used from the start ([\textcolor{blue}{Resnick, P., Iacovou, N., Suchak, M., Bergstrom, P., \& Riedl, J. (1994, October). Grouplens: An open architecture for collaborative filtering of netnews. In Proceedings of the 1994 ACM conference on Computer supported cooperative work (pp. 175-186).}](https://dl.acm.org/doi/10.1145/192844.192905)). As [\textcolor{blue}{Resnick et al. (1994)}](https://dl.acm.org/doi/10.1145/192844.192905) state: "Collaborative filters help people make choices based on the opinions of other people." 
+
+In the MovieLens framework this approach had been realized at first by presenting users movies that the system predicted the user would rate highest to be rated by that particular user. New users for which a prediction could not yet been made, were required to rate a given list of randomly and of hand-selected movies, before they could enter the MovieLens system ([\textcolor{blue}{Rashid, A. M., Albert, I., Cosley, D., Lam, S. K., McNee, S. M., Konstan, J. A., \& Riedl, J. (2002, January). Getting to know you: learning new user preferences in recommender systems. In Proceedings of the 7th international conference on Intelligent user interfaces (pp. 127-134).}](https://dl.acm.org/doi/10.1145/502716.502737)).
+
+This system has prevailed until vers. 4 of MovieLens, although the underlying algorithm underwent changes a couple of times ([\textcolor{blue}{Harper \& Konstan 2015, p. 19:6}](https://dl.acm.org/doi/abs/10.1145/2827872)). The early versions of MovieLens simply presented to the user one list of movies to be rated, later versions 2 and 3 included possibilities to select the genre and the release dates of the movies to be rated. In version 4 the ratings of so-called *buddies* were optionally included in the selection of movies to be rated.
+
+## R libaries being used
+I will be using the following libraries in the process:
+
+```{r install-missing-libs, message=FALSE, warning=FALSE, echo=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(ggthemes)) install.packages("ggthemes", repos = "http://cran.us.r-project.org")
+if(!require(gridExtra)) install.packages("gridExtra", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+if(!require(psych)) install.packages("psych", repos = "http://cran.us.r-project.org")
+if(!require(latex2exp)) install.packages("latex2exp", repos = "http://cran.us.r-project.org")
+if(!require(compiler)) install.packages("compiler", repos = "http://cran.us.r-project.org")
+```
+
+```{r loading-libs, message=FALSE}
+library(knitr)
+library(data.table)
+library(tidyverse)
+library(ggthemes)
+library(gridExtra)
+library(caret)
+library(lubridate)
+library(kableExtra)
+library(psych)
+library(latex2exp)
+library(compiler)
+```
+```{r useful-functions, echo=FALSE, results = 'hide', message=FALSE}
+fancy_scientific <- function(l) {
+ # turn in to character string in scientific notation
+ l <- format(l, scientific = TRUE)
+ # quote the part before the exponent to keep all the digits
+ l <- gsub("^(.*)e", "'\\1'e", l)
+ # turn the 'e+' into plotmath format
+ l <- gsub("e", "%*%10^", l)
+ # return this as an expression
+ parse(text=l)
+}
+
+setCompilerOptions(optimize=3)
+enableJIT(3)
+```
+The basic data I'll be using are stored and loaded from the file *movie_recommendation.RData* `r load(paste(getwd(), "/movie_recommendation.RData", sep =""))`out of the working directory of the present project. The data have been downloaded and prepared according to the instructions and R-code given under the heading "Create train and validation sets" in the course materials, which is reproduced in the box below and also included in the  in the accompanying *movie_recommendation.r* file.
+
+```{r data_preparation, eval=FALSE}
+##########################################################
+# Create edx set, validation set (final hold-out test set)
+##########################################################
+
+# Note: this process could take a couple of minutes
+
+repository = "http://cran.us.r-project.org"
+if(!require(tidyverse)) install.packages("tidyverse", repos = repository)
+if(!require(caret)) install.packages("caret", repos = repository)
+if(!require(data.table)) install.packages("data.table", repos = repository)
+
+library(tidyverse)
+library(caret)
+library(data.table)
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("https://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+
+# if using R 3.6 or earlier:
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+# if using R 4.0 or later:
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId),
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+
+## Describing the data
+
+### The data-sets {#problemswithtimestamp}
+
+The **edx**-data set consists of `r prettyNum(nrow(edx), big.mark=",")` records of `r ncol(edx)` variables (`r names(edx) %>% str_c("*", . , "*") %>% str_flatten(collapse=", ")`). The **validation**-set consists of `r prettyNum(nrow(validation), big.mark=",")` records of the same variables. Each record represents a rating of *one movie* by *one user*. The following table Tab. \@ref(tab:HeadMovielensDb1). gives an impression of the original structure of the movielens-data set as it is being used in the present task.
+```{r HeadMovielensDb1, echo=FALSE}
+edx_example_tbl <- edx[1958:1961, ]
+rownames(edx_example_tbl) <- NULL
+kbl(edx_example_tbl, booktabs = T, caption = "Structure of records in edx-dataset") %>% kable_styling(latex_options = "HOLD_position")
+```
+
+Each record has a unique **userId**, a unique **movieId**, a **timestamp** representing the date and time of the rating in the form of an **integer** (which can be converted into a human-readable date-time-string using the `as_datetime`-function from the *lubridate*-package, the **title** of the movie including the release-date in parentheses, and a **genres**-string that holds the labels for genres separated by the **pipe**-symbol `|`.
+
+In the present analysis the **validation**- and **edx**-datasets have been modified by extracting the release date from the **title**-field into an additional column **releaseDate**. 
+
+Seemingly there are, however, a few problems with the **timestamp**-field: In a few cases the decoding of the **timestamp** results in a date *before* the release of the movie, which obviously indicates some kind of error. 
+
+E.g. in the **edx**-data set the command `edx[which(edx$userId==8010 & movieId==887), ]` results in a record with the timestamp ` `r edx[which(edx$userId==8010 & movieId==887), ] %>% pull(timestamp)` ` (see Tab. \@ref(tab:PossibleErrorInTimestamp)). Decoding this timestamp results in: ` `r as_datetime(edx[which(edx$userId==8010 & movieId==887), ] %>% pull(timestamp))` `, which obviously is wrong, as the date is *before* the release date of the movie.
+```{r PossibleErrorInTimestamp, echo=FALSE}
+edx[which(edx$userId==8010 & movieId==887), ] %>% kbl(booktabs = T, caption = "Possible error in the edx-dataset") %>% kable_styling(latex_options = "HOLD_position")
+```
+
+```{r modify_data_sets, echo=FALSE}
+validation <- validation %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))
+edx        <- edx        %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))
+```
+```{r calc_users, echo=FALSE}
+v <- validation %>% group_by(userId) %>% summarise(ratings_per_user = n(), mean_rating_per_user = mean(rating), sd_rating_per_user = sd(rating)) 
+e <- edx %>% group_by(userId) %>% summarise(ratings_per_user = n(), mean_rating_per_user = mean(rating), sd_rating_per_user = sd(rating)) 
+desc_v <- describe(v)
+desc_e <- describe(e)
+```
+
+## Further insights into the structure of the data
+
+### The movies {#the-movies}
+All in all there are `r prettyNum(n_distinct(edx$movieId), big.mark=",")` movies in the **edx**-set, and `r prettyNum(n_distinct(validation$movieId), big.mark=",")` movies in the **validation**-set. In the complete data set there are as well `r prettyNum(n_distinct(setDT(rbind.data.frame(edx, validation))$movieId), bigmark=",")` movies (four less than the number reported in [\textcolor{blue}{Harper \& Konstan (2015)}](https://dl.acm.org/doi/abs/10.1145/2827872), Tab. II).
+
+```{r calc_g1, message = FALSE, echo=FALSE}
+g <- setDT(rbind.data.frame(edx, validation)) %>% group_by(movieId) %>% summarise(n=n(), mean_r=mean(rating)) 
+```
+There is  a weak association of ${r}$ = `r  round(cor(g$n, g$mean_r), digits=3)` between the average rating of a movie and the number of ratings of a movie which means that movies with an on average higher rating are also rated more often, as shown in figure \@ref(fig:DescriptionGenresAvg). This association might result from the fact that within the framework of the MovieLens system positively rated movies are more often presented to users, who then more often rate those, accordingly.
+
+```{r DescriptionGenresAvg, message=FALSE, echo=FALSE, fig.cap="Average ratings of movies against number of ratings of movies", out.width = "65%"}
+g %>% ggplot(aes(y=n, x=mean_r)) + geom_point(size=0.5) + labs(x = "average rating of movie", y = "number of ratings of movie") + scale_y_continuous(labels=fancy_scientific)
+```
+```{r description-ratings-per-movies, message=FALSE, echo=FALSE}
+g <- setDT(rbind.data.frame(edx, validation)) %>% group_by(movieId) %>% summarise(ratingsByMovie=n()) 
+```
+
+The fact that some movies are more often rated than others can also be seen from the distribution of the *count* of ratings for individual movies as shown in figure \@ref(fig:DescrRatPerMovies). Here the *median* number of rating per movie is `r median(g$ratingsByMovie)`, meaning that half of the movies in the database gets **`r median(g$ratingsByMovie)`** or less ratings. On the other hand there is one movie (*`r edx[which(edx$movieId == g[which(g$ratingsByMovie == max(g$ratingsByMovie)), ]$movieId)[1], ]$title`*) having received **`r max(g$ratingsByMovie)`** ratings.
+
+```{r DescrRatPerMovies, message=FALSE, echo=FALSE, fig.cap="Count of ratings for individual movies", out.width = "65%"}
+g %>% ggplot(aes(ratingsByMovie)) + geom_histogram(binwidth = 0.1, color = "black") + scale_x_log10() + annotation_logticks(sides="b") + labs(x = "number of ratings", y = "number of movies")
+```
+
+### The genres {#the-genres}
+The different genres of the movies are `r validation %>% pull(genres) %>% str_split(pattern="\\|") %>%  unlist() %>% unique() %>% sort() %>%  str_c("*", . , "*") %>%  str_flatten(collapse = ", ")` both in the **edx**- and in the **validation**-data set, with the exception of the **edx**-data set also having entries denoted as "`r edx %>% pull(genres) %>% str_split(pattern="\\|") %>%  unlist() %>% unique() %>% sort() %>% .[1] %>% str_c("*", . , "*")`".
+
+The following table \@ref(tab:DescriptionGenreTables) lists the number of ratings of movies to which each category is assigned both in the **edx**- and in the **validation**-sample. 
+
+```{r description-genres, echo=FALSE}
+genres <- edx %>% pull(genres) %>% str_split(pattern="\\|") %>%  unlist() %>% unique() %>% sort()
+n_genres_edx <- sapply(genres, function(g) { sum(str_detect(edx$genres, g)) })
+n_genres_validation <- sapply(genres, function(g) { sum(str_detect(validation$genres, g)) })
+```
+```{r DescriptionGenreTables, echo=FALSE, cached=FALSE}
+genres_table <- data.frame(Genre = genres, edx = n_genres_edx, validation = n_genres_validation)
+rownames(genres_table) <- NULL
+genres_table <- genres_table[order(genres_table$edx, decreasing = TRUE),]
+genres_table$edx <- sapply(genres_table$edx, function(x) { prettyNum(x, big.mark=",") })
+genres_table$validation <- sapply(genres_table$validation, function(x) { prettyNum(x, big.mark=",") })
+genres_table %>% as_tibble %>% 
+kbl(booktabs = T, caption = "Count of ratings of movies assigned to each genre") %>% kable_styling(latex_options = c("hold_position"), full_width = TRUE)
+```
+```{r genre_detail_tables_0, echo=FALSE, message=FALSE, cached=FALSE}
+all_movies <- setDT(rbind.data.frame(edx, validation))
+```
+The distribution of ratings of each movie among the different genres is quite similar with an average of the mean ratings of movies grouped by *genres* of $\overline{\mu}$ = `r round(mean(all_movies %>% group_by(movieId) %>% summarise(m = mean(rating)) %>% pull(m)), digits = 3)`. (Interestingly the overall mean of all ratings in the complete database (not being grouped by *movieId*) is somewhat higher with $\overline{\mu}'$ = `r round(mean(all_movies$rating), digits = 3)`, which again is the consequence of higher-ranking movies being rated more often.) The following graph (Figure \@ref(fig:DisplayGenresViolPlot)) depicts the distribution of mean ratings of individual movies for the different genres.
+```{r genre_detail_tables, echo=FALSE, message=FALSE, error = FALSE, warning=FALSE, cached=FALSE}
+list_genres <- all_movies %>% pull(genres) %>% str_split(pattern="\\|") %>% unlist() %>% unique() %>% sort() %>% .[-1]
+for(i in seq_along(list_genres)){assign(tolower(gsub("\\-", "_", list_genres[i])), (
+          all_movies %>% filter(str_detect(genres, list_genres[i])) %>% select(-title) %>% select(-timestamp) %>% select(-genres) %>% mutate("genre" = list_genres[i])))}
+all_movies_by_genre <- do.call("rbind", lapply(tolower(gsub("\\-", "_", list_genres)),get))
+rm(list = tolower(gsub("\\-", "_", list_genres)))
+rm(list_genres, i, genres_table)
+genres_viol_plot <- all_movies_by_genre %>% group_by(movieId) %>% summarise(rating=mean(rating), movieId=movieId, genre=genre) %>% unique() %>% ggplot(aes(x=genre, y=rating)) + geom_violin() + stat_summary(fun = "mean", geom = "crossbar", width = 0.5, colour = "red") + scale_x_discrete(limits=rev) + coord_flip()
+```
+
+```{r DisplayGenresViolPlot, echo=FALSE, message=FALSE, warning=FALSE, cached=FALSE, fig.cap="Distribution of mean ratings of movies assigned to each genre (red bar indicates the overall mean for each genre)", out.width = "65%"}
+genres_viol_plot
+rm(all_movies_by_genre)
+```
+
+It can be noted that the **film-noir** movies on average get ratings that are somehat higher than the other movies, while the **horror**-movies on average are rated somewhat lower, as shown by the next box-plots, where the non-overlapping of the notches indicates the statistical significance of differences in mean ratings (see Figure \@ref(fig:FilmNoirAndHorror)).
+
+```{r FilmNoirAndHorror, echo=FALSE, message=FALSE, error = FALSE, warning=FALSE, cached=FALSE, fig.cap="Comparison of film-noir- and of horror-movies to movies having been tagged with other genres", out.width = "65%"}
+film_noir <- all_movies %>% filter(grepl("Film-Noir", genres)) %>% group_by(movieId) %>% summarise(rating=mean(rating), "film_noir" = TRUE)
+not_film_noir <- all_movies %>% filter(!grepl("Film-Noir", genres)) %>% group_by(movieId) %>% summarise(rating=mean(rating), "film_noir" = FALSE)
+film_noir <- rbind(film_noir, not_film_noir)
+rm (not_film_noir)
+horror <- all_movies %>% filter(grepl("Horror", genres)) %>% group_by(movieId) %>% summarise(rating=mean(rating), "horror"=TRUE)
+not_horror <- all_movies %>% filter(!grepl("Horror", genres)) %>% group_by(movieId) %>% summarise(rating=mean(rating), "horror"=FALSE)
+horror <- rbind(horror, not_horror)
+rm(not_horror)
+grid.arrange(
+  film_noir %>%  ggplot(aes(x = factor(film_noir), y = rating)) + geom_boxplot(notch = TRUE) + labs(x = "“Film-noir”: true/false"), 
+  horror %>% ggplot(aes(x = factor(horror), y = rating)) + geom_boxplot(notch = TRUE) + labs(x = "“Horror”: true/false")
+  , nrow = 1)
+rm(film_noir, horror)
+```
+
+### The users {#the-users}
+The number of distinct users in the **edx**-set is `r prettyNum(n_distinct(edx$userId), big.mark=",")`, and in the **validation**-set `r prettyNum(n_distinct(validation$userId), big.mark=",")`, respectively. However, there are obvious differences between the **edx**- and the **validation**-data set: In the **validation**-data set the the majority of users rates `r desc_v["ratings_per_user",]$median` or less movies (`r desc_v["ratings_per_user",]$median` being the *median*), while in the **edx**-data set the median is `r desc_e["ratings_per_user",]$median `. 
+
+In the **validation**-data set the minimum number of ratings of a single user is `r desc_v["ratings_per_user",]$min `, and the maximum number is `r desc_v["ratings_per_user",]$max`. In the **edx**-data set the minimum number of ratings of a single user is `r desc_e["ratings_per_user",]$min`, and the maximum number is `r desc_e["ratings_per_user",]$max`. These differences simply result from the **validation**-set being much smaller than the **edx**-set (e.g. the **edx**-data set contains `r edx %>%  filter(userId == 1) %>% count() %>% unlist()` ratings by user 1 (`userId == 1`), while the **validation**-set contains only `r validation %>%  filter(userId == 1) %>% count() %>%  unlist()` ratings by the same user).
+
+However the mean rating each user gives is identical in both data sets (`r format(round(desc_e["mean_rating_per_user",]$mean, 2), nsmall = 2)`), with just small differences of variability within users (**edx**: *sd* = `r format(round(desc_e["sd_rating_per_user",]$mean, 2), nsmall = 2)`, **validation**: *sd* = `r format(round(desc_v["sd_rating_per_user",]$mean, 2), nsmall = 2)`). 
+
+```{r top_number_raters, echo=FALSE}
+top_1 <- e[order(-e$ratings_per_user), ] %>% head(2) %>% pull(userId) %>% .[1]
+top_2 <- e[order(-e$ratings_per_user), ] %>% head(2) %>% pull(userId) %>% .[2]
+top_1_start_date <- edx %>% filter(userId == top_1) %>% summarize(t=timestamp) %>% describe() %>% .$min
+top_1_end_date <- edx %>% filter(userId == top_1) %>% summarize(t=timestamp) %>% describe() %>% .$max
+top_1_dates_diff <- difftime( as.Date(as_datetime(top_1_end_date)), as.Date(as_datetime(top_1_start_date)) ) 
+sum_top1_ratings <- (edx %>% filter(userId == top_1) %>% count(userId) %>%  pull(n)) + (validation %>% filter(userId == top_1) %>% count(userId) %>%  pull(n))
+sum_top2_ratings <- (edx %>% filter(userId == top_2) %>% count(userId) %>%  pull(n)) + (validation %>% filter(userId == top_2) %>% count(userId) %>%  pull(n))
+```
+A small number of users have given ratings to a fairly huge number of movies, e.g. users *`r top_1`* and *`r top_2`*. Taking together the **edx**- and the **validation**-data set user *`r top_1`* has rated **`r sum_top1_ratings`** movies, and user *`r top_2`* has rated **`r sum_top2_ratings`** movies.
+
+```{r users_distribution_1, message=FALSE, echo=FALSE}
+g <- setDT(rbind.data.frame(edx, validation)) %>% group_by(userId) %>% summarise(ratingsByUser=n()) 
+```
+Figure \@ref(fig:UsersDistribution) shows how many users rate how many movies. It can be seen that the majority of users rates less than 70 movies (*median* = `r median(g$ratingsByUser)`). 
+
+```{r UsersDistribution, message=FALSE, echo=FALSE, fig.cap="Distribution of number of ratings of individual users", out.width = "65%"}
+g %>% ggplot(aes(ratingsByUser)) + geom_histogram(binwidth = 0.05, color = "black") + scale_x_log10() + annotation_logticks(sides="b") + labs(x = "number of ratings by individual users", y = "number of users")
+rm(g)
+```
+
+In the case of user *`r top_1`* the difference between the dates of the first and the last rating is `r as.numeric(top_1_dates_diff)` days. Given the total number of ratings of this user, it means that this user, over a period of almost `r ceiling(time_length(top_1_dates_diff, "week"))` weeks, has perhaps watched, and at least rated, every day (on average) a number of `r  format(sum_top1_ratings / as.numeric(top_1_dates_diff), digits = 2)` movies.
+
+It being unlikely that a single person has consumed so many movies over such an extended period of time, it is possible that this user (and maybe others like user *`r top_2`*) has made his huge amount of ratings based solely on a superficial impression of the respective movies.
+
+It remains unclear, whether or not the inclusion of users with possibly not so well founded ratings has implications for the generation of movie recommendations. It is likely, however, that some kind of bias is being introduced.
+
+### The ratings {#the-ratings}
+
+The range of ratings extends from min = `r as.numeric(summary(edx$rating)[1])` to max = `r as.numeric(summary(edx$rating)[6])`. "Half-star" ratings have not always been present in the MovieLens database. As [\textcolor{blue}{Harper \& Konstan (2015, p. 19:8)}](https://dl.acm.org/doi/abs/10.1145/2827872) state: "The biggest change to the ratings interface came with the launch of v3 (February 18th, 2003) when the interface shifted from “whole star” to “half star” ratings, the most-requested feature in a user survey, doubling the range of preference values from five (1–5) to ten (0.5–5.0)."
+
+This change can be  seen in the data. To visualize this the combined data set of **validation**-data and **edx**-data has been divided into one part having only the ratings from before Feb. 18th, 2003, and one part having the ratings from Feb. 18th, 2003 onwards. Figure \@ref(fig:RatingsV2V3) shows that in the former part there are only *full star*-ratings present, while in the latter part there are also *half-star*-ratings. 
+
+
+```{r RatingsV2V3, message=FALSE, echo=FALSE, cached=FALSE, fig.cap="Distribution of ratings in ver.0 to ver.2, and ver.3 and after of MovieLens database", out.width = "65%"}
+g <- setDT(rbind.data.frame(edx, validation))
+grid.arrange(
+ g %>% filter(as_datetime(timestamp) < as.POSIXct("2003-02-18", format="%Y-%m-%d", tz="UTC")) %>% ggplot(aes(rating)) + geom_bar(width = 0.47) + ggtitle("before Feb. 18th, 2003") + theme(plot.title=element_text(size=14)) + scale_y_continuous(labels=fancy_scientific) ,
+ g %>% filter(as_datetime(timestamp) >= as.POSIXct("2003-02-18", format="%Y-%m-%d", tz="UTC")) %>% ggplot(aes(rating)) + geom_bar() + ggtitle("from Feb. 18th 2003 onwards") + theme(plot.title=element_text(size=14)) + scale_y_continuous(labels=fancy_scientific) , nrow = 1)
+```
+
+Figure \@ref(fig:RatingVsYdiff)  shows that, with the exception of the oldest movies in the database, the newer movies tend to be rated somewhat lower than those that were 25+ years old at the time of rating, which might show some influence of a “nostalgia”-effect among the users. Here the above mentioned possible error with some entries in the `timestamp`-field (see: \@ref(problemswithtimestamp)) has been corrected by setting *negative differences* of *rating date* and *release date* (*"movie age"*) to `0`.
+
+```{r RatingVsYdiff, message=FALSE, warning=FALSE, echo=FALSE, cached=FALSE, fig.cap="Mean ratings of movies against difference between release year and year the movies was rated", out.width = "65%"}
+rm(all_movies, desc_e, desc_v, genres_viol_plot, e, edx_example_tbl, top_1, top_2, top_1_dates_diff, top_1_end_date, top_1_start_date,genres, sum_top1_ratings, sum_top2_ratings, v)
+g <- setDT(rbind.data.frame((edx %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))), (validation %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric())))))
+g <- g %>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% select(timestamp, userId, movieId, releaseDate, rating_year, rating) %>% mutate("ydiff"= rating_year - releaseDate)
+g[which(g$ydiff < 0), ]$ydiff <- 0
+g <- g %>% group_by(ydiff) %>% summarise(mean_r = mean(rating), ydiff) %>% unique()
+gplot <- g %>% ggplot(aes(ydiff, mean_r)) + geom_point() + geom_smooth(method="gam", n=(max(g$ydiff)-min(g$ydiff))+1) + labs(x = "age of movie at the time of rating", y = "mean rating of movie")
+ratings_by_movie_age <- (ggplot_build(gplot))$data[[2]] %>% select(x, y)
+gplot
+```
+
+# Methods
+
+## Defining the *root mean squared error* (RMSE)
+
+The RMSE is a measure of accuracy of a prediction.
+In the given case this means that the larger the RMSE, the lesser the accuracy of the prediction of movie ratings. 
+
+The RMSE is mathematically related to the *standard deviation* in that it is the root of the mean squared differences of each rating and the prediction of such rating resulting from the model.
+
+The formula of the RMSE is as follows: 
+$$
+RMSE =\sqrt{\frac{1}{N}\sum_{u,i}(\hat{y}_{u,i} - y_{u,i})^2}
+$$ 
+In *R* this boils down to a (pseudo-)code like: `RMSE = sqrt(mean((predicted_ratings_from_the_model - actual_ratings_from_validation_set)^2))`. This function is implemented as `RMSE()` in the *caret*-package which has been loaded for the present analysis.
+
+To be able to compute the RMSE it is first necessary to determine from the **edx**-data set (**train**-set in the following) a function to calculate predictions. 
+
+The results of this procedure then have to be checked with the **validation**-data set, in the present case by calculating the RMSE. 
+
+## Modeling approach {#modeling-approach}
+
+### grand mean of ratings as a predictor
+
+
+```{r calculation_of_mean_values_and_predictions, message=FALSE, echo=FALSE}
+# Calculate overall mean
+mu <- mean(edx$rating)
+
+# Calculate mean by movie
+means_by_movie <- edx %>% group_by(movieId) %>% summarize(b_i = mean(rating - mu))
+
+# Calculate mean by user 
+means_by_user <- edx %>% left_join(means_by_movie, by = "movieId") %>% group_by(userId) %>% summarize(b_u = mean(rating - b_i - mu))
+
+# Prepare calculation mean by genre: calculate means for single genres, and the average them for all genre combinations
+list_genres <- edx %>% pull(genres) %>% str_split(pattern="\\|") %>% unlist() %>% unique() %>% sort() %>% as.data.frame() %>% mutate("b_g" = 0)
+colnames(list_genres)[1] <- "genre"
+for(i in 1:nrow(list_genres)) {
+	g <- edx %>% filter(str_detect(genres, list_genres$genre[i])) %>% summarise(genre=list_genres$genre[i], b_g=mean(rating)) %>% unique()
+	list_genres[which(list_genres$genre == g$genre),]$b_g = g$b_g
+}
+g <- edx$genres %>% unique() %>% as.data.frame()
+colnames(g)[1] <- "genres"
+g <- g %>% mutate(m_g = 0)
+for (i in 1:nrow(g)) {
+	n_genres <- length(unlist(strsplit(g[i, ]$genres, split="\\|")))
+	s_genres <- 0
+	for (j in 1:n_genres) { s_genres <- s_genres + list_genres[which(list_genres$genre == unlist(strsplit(g[i, ]$genres, split="\\|"))[j]),]$b_g }
+	g[i,]$m_g <- s_genres / n_genres
+}
+
+# Calculate means by movie genre (two methods)
+means_by_genres <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(g, by = "genres") %>% group_by(genres) %>% summarize(genres=genres, m_gcomb=m_g, mean_g=mean(rating), b_g = mean(rating - b_i - b_u - mu), b_gcomb = mean(m_g - b_i - b_u - mu) ) %>% unique()
+
+# Calculate mean by movie-age at the time of rating
+means_by_movie_age <- edx %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(releaseDate, rating_year, title)) %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% group_by(ydiff) %>% summarize(b_a = mean(rating - b_i - b_u - b_g - mu))
+
+# Calculation of predictions in *train*-set
+movie_effect_prediction      <- edx %>% left_join(means_by_movie, by = "movieId") %>% pull(b_i) + mu
+movie_and_user_effect_train  <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% mutate(prediction = mu + b_i + b_u) %>% pull(prediction)
+mov_usr_gen_eff_comb_train   <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate(prediction = mu + b_i + b_u + b_gcomb) %>% pull(prediction)
+mov_usr_gen_eff_train        <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate(prediction = mu + b_i + b_u + b_g) %>% pull(prediction)
+
+mov_usr_gen_eff_age_train    <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% left_join(means_by_movie_age, by = "ydiff") %>% mutate(prediction = mu + b_i + b_u + b_g + b_a) %>% pull(prediction)
+```
+
+The easiest approach to predicting movie ratings would be to assume that all movies get a rating as high as the mean rating in the **train**-set ($\hat\mu$ = `r round(mu, digits=2)`).
+
+The formula in this case would be: 
+$$
+Y_{u,i} = \mu + \epsilon_{u,i}
+$$ 
+where $\mu$ is the grand mean of all ratings and $\epsilon$ is an error-term. The indices $u$ and $i$ refer to the *users*, and the *movies* respectively. Other features (besides *users* and the *movies*) might be included as well, however. 
+
+The calculation of the RMSE results in the **train**-set in a value of RMSE = **`r round(RMSE(mean(edx$rating), edx$rating), digits=4)`**, meaning that the average deviation of the prediction from the actual value is somewhat larger than **1**. In the **test**-set the result is RMSE = **`r round(RMSE(mean(edx$rating), validation$rating), digits=4)`**, which is even a bit worse. With this model on average the ratings would be "one star" off, which is not a good result.
+
+### getting more specific by including movie-information
+
+To get to better results it is required in a first step to include more specific information on particular movies. 
+
+Here the formula is: 
+$$
+Y_{u,i} = \mu + b_i + \epsilon_{u,i}
+$$ 
+where $b_i$ represents the deviation of the mean rating of a specific movie from the overall mean $\mu$. The distribution of these $b_i$-values is skewed as can be seen from the following graph (Fig. \@ref(fig:plotMovieEffect)).
+
+```{r plotMovieEffect, message=FALSE, echo=FALSE, cached=FALSE, fig.cap="Distribution of *movie-effects* $b_i$", out.width = "65%"}
+qplot(means_by_movie$b_i, binwidth=0.25, color=I("black"), ylab="", xlab="movie effect")
+```
+
+The predictions are now computed by *adding* for each movie the specific movie effect $b_i$ (which can be positive *or* negative) to the estimated overall mean $\hat\mu$ and using the resulting vector to calculate the *RSME*.
+
+The deviation of predicted and actual ratings in the **train**-set is now lower with a RMSE = **`r round(RMSE(movie_effect_prediction, edx$rating), digits=4)`**, meaning the prediction error is now somewhat less than **1.0**.
+
+### adding user-information
+
+It is likely that different users follow different patterns in their ratings. There might be users who are almost always critical of the movies they rate, while others might like almost everything they are confronted with.
+
+This variability can be seen from the following graph (Fig. \@ref(fig:plotUserEffect)). It shows that the variation of users' ratings is roughly normal distributed around $m$ = `r round(edx %>% group_by(userId) %>% summarize(b_u = mean(rating)) %>% summarise(m = mean(b_u)) %>% as.numeric(), digits=3)` with a *standard deviation* of $s$ = `r round(edx %>% group_by(userId) %>% summarize(b_u = mean(rating)) %>% summarise(s = sd(b_u)) %>% as.numeric(), digits=3)`
+
+```{r plotUserEffect, message=FALSE, echo=FALSE, cached=FALSE, fig.cap="Distribution of *user-effects* $b_u$", out.width = "65%"}
+edx %>% group_by(userId) %>% summarize(b_u = mean(rating)) %>% ggplot(aes(b_u)) + geom_histogram(binwidth=0.125, color=I("black")) + labs(x=unname(TeX("$b_u$")))
+```
+
+To further improve the predictions of movie ratings a user-term can be included in the equation, which now is:
+
+$$
+Y_{u,i} = \mu + b_i + b_u + \epsilon_{u,i}
+$$
+
+where $b_u$ represents the deviation of the mean rating of an individual *user* from the mean rating of one movie $b_i + \mu$.
+
+By including the *user*-term the result in the **train**-set is RMSE = **`r round(RMSE(movie_and_user_effect_train, edx$rating), digits=4)`**, which is considerably better than the initial model.
+
+### effects of movie-genres
+
+As was reported in the section on genres (see \@ref(the-genres)) there is a difference in mean ratings for movies from different genres. This difference can be included in the model according to formula:
+
+$$
+Y_{u,i,g} = \mu + b_i + b_u + b_g + \epsilon_{u,i}
+$$
+
+The question is, however, how to calculate the influence of the *genres* $b_g$. One way to do this is to group all ratings by their *genres*-string (which results into `r edx$genres %>% unique() %>% length()` combinations), and then calculate the *mean*-rating $m_g$ for each of those combinations. 
+
+A different way is to take the list of all *genre*-tags (including the "(no genres listed)"-tag which ist present only in the **edx**-data set), and then to subsequently calculate mean ratings for all movies, to which the *genre*-tags from this list apply. In the case of multiple *genre*-tags per movie then the sum of these means is divided by the number of *genre*-tags for the respective movie. 
+
+As a formula it is:
+
+$$
+m_{g(comb)} = \frac{1}{G}\sum^G_{g=1}x_g
+$$
+
+where $G$ is the number of *genres* with which a movie is tagged, and $x_g$ is the mean rating of all movies having been tagged with *genre* $g$.
+
+If $m_g$ and $m_{g(comb)}$ are plotted against each other it can be seen that both are not linear associated, and so they are not really equivalent, as shown in the following graph (Fig. \@ref(fig:plotMovieGenreEffects)).
+
+```{r plotMovieGenreEffects, message=FALSE, echo=FALSE, cached=FALSE, fig.cap="Plot of combination of mean genre ratings $m_{g(comb)}$ and mean ratings grouped by \\textit{genres}-string $m_g$", out.width = "65%" }
+qplot(x=mean_g, y=m_gcomb, data=means_by_genres, ylab=unname(TeX("$m_{g(comb)}$")), xlab=unname(TeX("$m_g$")))+ geom_point(size=1.0)
+```
+
+To decide which of the two approaches should be chosen, a RMSE is calculated with the resulting $b_g$ of both. In the case of using $m_g$ results a RMSE = **`r round(RMSE(mov_usr_gen_eff_train, edx$rating), digits=4)`**, in the case of using $m_{g(comb)}$ the result is RMSE = **`r round(RMSE(mov_usr_gen_eff_comb_train, edx$rating), digits=4)`**, which indicates that $m_g$ is a better choice to be included in the predictive model. However, the gain in prediction accuracy by including genre-information seems to be only marginal.
+
+### does movie-age at the time of rating play a part?
+
+As it was shown in the section on ratings  (see \@ref(the-ratings)) there is an association between the age of the movie at the time of rating and the ratimg it gets. It might be useful then to include this factor into the prediction. With $b_a$ indicating the age of the movie at the time of rating as a formula it would then be:
+
+$$
+Y_{u,i} = \mu + b_i + b_u + b_g + b_a + \epsilon_{u,i}
+$$
+
+Including this factor, however, again contributes only marginally to an improvement of the prediction, which (in the **train**-set) is now RMSE = **`r round(RMSE(mov_usr_gen_eff_age_train, edx$rating), digits=4)`**.
+
+### is it possible to still get to better results using regularization?
+
+It can be assumed that some movies with only a few ratings get an overly strong influence on the predictions, particularly if the deviation of a movie's *actual* from the *predicted* rating is high. To account for this a *regularization* can be done by adding a term $\lambda$ which is construed such, that, say, a sum of $n$ deviations of *actual* and *predicted* ratings is divided by $\lambda + n$. If $n$ is *large* this term basically equals the mean deviation of *actual* and *predicted* ratings, and is counted as such. If, however, $n$ is small (e.g.: $1$), then the mean deviation of *actual* and *predicted* ratings shrinks considerably (of course depending on the size of $\lambda$), as $\lambda$ is added to the demnominator when averaging the ratings. 
+
+As a formula this can be written as:
+
+$$
+\frac{1}{N}\sum_{u,i,g,a}(y_{u,i,g,a} - \mu - b_i - b_u - b_g - b_a)^2 + \lambda\left(\sum_i b_i^2 + \sum_u b_u^2 + \sum_g b_g^2 + \sum_a b_a^2\right)
+$$
+
+In the present case a $\lambda$ was picked by cross-validation using a sequence of possible $\lambda$s from `0` to `10` with increasing intervals from `0.05` to `0.25`. From the following graph (Fig. \@ref(fig:plotLambdasVsRMSEs)) it can be seen, however, that using regularization in the context of the present model does *not* contribute to a better prediction. So the final results will be computed without the use of regularization.
+
+```{r calculation_of_lambda_penalty_terms, message=FALSE, echo=FALSE}
+lambdas <- c(seq(0, 0.5, 0.05), seq(0.55, 1, 0.1), seq(1.25, 5, 0.25))
+train_set <- edx %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate, title))
+test_set <- validation %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate))
+mu <- mean(train_set$rating)
+rmses <- sapply(lambdas, function(l){
+	b_i <- train_set %>% group_by(movieId) %>% summarize(b_i = sum(rating - mu)/(n()+l))
+	b_u <- train_set %>% left_join(b_i, by="movieId") %>% group_by(userId) %>% summarize(b_u = sum(rating - b_i - mu)/(n()+l))
+	b_g <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% group_by(genres) %>% summarize(b_g = sum(rating - b_i - b_u - mu)/(n()+l))
+	b_a <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% left_join(b_g, by="genres") %>% group_by(ydiff) %>% summarize(b_a = sum(rating - b_i - b_u - b_g - mu)/n()+l)
+
+	predicted_ratings <- test_set %>% 
+	left_join(b_g, by = "genres") %>% left_join(b_i, by = "movieId") %>% left_join(b_u, by = "userId") %>% left_join(b_a, by = "ydiff") %>% 
+	mutate("prediction" = mu + b_i + b_u + b_g + b_a) %>% .$prediction
+
+	return(RMSE(predicted_ratings, test_set$rating))
+})
+```
+```{r plotLambdasVsRMSEs, message=FALSE, echo=FALSE, cached=FALSE, fig.cap="Plot of $\\lambda$ and RMSE from the present model", out.width = "65%"}
+qplot(x=lambdas, y=rmses, ylab="RSMEs", xlab=unname(TeX("$\\lambda$")))
+```
+
+# Results
+```{r calculation_of_predictions_in_test_set, message=FALSE, echo=FALSE, }
+test_movie_effect_pred    <- validation %>% left_join(means_by_movie, by = "movieId") %>% pull(b_i) + mu
+test_movie_user_pred      <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% mutate(prediction = mu + b_i + b_u) %>% pull(prediction)
+test_mov_usr_gen_pred     <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate(prediction = mu + b_i + b_u + b_g) %>% pull(prediction)
+test_mov_usr_gen_age_pred <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% left_join(means_by_movie_age, by = "ydiff") %>% mutate(prediction = mu + b_i + b_u + b_g + b_a) %>% pull(prediction)
+
+test_pred_res <- data.frame(                 "prediction model"="overall mean",                               "RMSE" = formatC(RMSE(mean(edx$rating), validation$rating)         , format="f", digits=5)  )
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie effects",                              "RMSE" = formatC(RMSE(test_movie_effect_pred, validation$rating)   , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie and user effects",                     "RMSE" = formatC(RMSE(test_movie_user_pred, validation$rating)     , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, and genres effects",            "RMSE" = formatC(RMSE(test_mov_usr_gen_pred, validation$rating)    , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, genres, and movie age effects", "RMSE" = formatC(RMSE(test_mov_usr_gen_age_pred, validation$rating), format="f", digits=5) ))
+```
+
+The results of predictions using the present modeling approach (see \@ref(modeling-approach)) are presented in the below table:
+
+```{r TableOfPredictionsInTestSet, message=FALSE, echo=FALSE}
+kbl(test_pred_res, booktabs = T, caption = "Results of predictions in the validation-data set") %>% kable_styling(latex_options = c("HOLD_position"), full_width = TRUE)
+```
+The final result of using *movie*, *user*, combination of *genres* for movies, and *age of movie* at the time of rating results in the RMSE = **`r formatC(RMSE(test_mov_usr_gen_age_pred, validation$rating), format="f", digits=5)`**, which in the context of the present task seems acceptable.
+
+\newpage
+
+# Concluding Remarks
+
+While the first estimate using only the overall mean resulted in an RSME larger than 1.0, the final model resulted in a RMSE that was improved approx. 18.5 %. The regularization in the present model did not add to the accuracy of prediction and thus was not used in the calculation of fonal results. 
+
