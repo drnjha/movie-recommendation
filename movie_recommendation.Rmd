@@ -17,6 +17,9 @@ output:
     extra_dependencies: flafter
   bookdown::html_document2:
     css: "html-style.css"
+    toc: yes
+    number_sections: yes
+    theme: spacelab
     fig_caption: yes
     keep_tex: yes
     fontsize: 11pt
@@ -39,7 +42,7 @@ An analysis is done of the 10M subset of the **MoviLens** database with the aim 
 
 The resulting algorithm is then tested against another, independent division from the original data set (*test* data).
 
-The final result demonstrates that by including several predictive markers in a simple model, a considerable gain in prediction accuracy can be achieved. 
+The final result demonstrates that by including several predictive markers in a simple model, a considerable gain in predictive accuracy can be achieved. 
 
 # Introduction and Overview
 
@@ -50,7 +53,7 @@ I first will try to *describe* the data to some extent, and then to detect *patt
 I'll also take into account possible effects of movie-*genres* and of the *age of the movie at the time of rating*.
 
 ## The MoviLens data
-The Movielens system has first been released 1998 by a team from the Univ. of Minnesota (cf. [\textcolor{blue}{Harper, F. M., \& Konstan, J. A. (2015). The movielens datasets: History and context. ACM tiis, 5(4), 1-19.}](https://dl.acm.org/doi/abs/10.1145/2827872)). The data that have been collected by MovieLens are a result of people interacting with an online movie-recommendation system, a process in which the users are required to input their movie preferences into the system.
+The MovieLens system has first been released 1998 by a team from the Univ. of Minnesota (cf. [\textcolor{blue}{Harper, F. M., \& Konstan, J. A. (2015). The movielens datasets: History and context. ACM tiis, 5(4), 1-19.}](https://dl.acm.org/doi/abs/10.1145/2827872)). The data that have been collected by MovieLens are a result of people interacting with an online movie-recommendation system, a process in which the users are required to input their movie preferences into the system.
 
 Although MovieLens was only launched in the fall of 1997 it includes ratings from before that time. Those ratings had been made with the predecessor of MoviLens, "EachMovie" by DEC. DEC had decided to discontinue their system, and transfered an anonymized dataset of ratings to the makers of MovieLens, who had already developed a community based rating and filtering machanism for usenet-articles ([\textcolor{blue}{Konstan, J. A., Miller, B. N., Maltz, D., Herlocker, J. L., Gordon, L. R., \& Riedl, J. (1997). Grouplens: Applying collaborative filtering to usenet news. Communications of the ACM, 40(3), 77-87.}](https://dl.acm.org/doi/pdf/10.1145/245108.245126)). 
 
@@ -103,6 +106,24 @@ fancy_scientific <- function(l) {
 
 setCompilerOptions(optimize=3)
 enableJIT(3)
+
+getOutputFormat <- function() {
+  output <- rmarkdown:::parse_yaml_front_matter(
+    readLines(knitr::current_input())
+    )$output
+  if (is.list(output)){
+    return(names(output)[1])
+  } else {
+    return(output[1])
+  }
+}
+
+if(getOutputFormat() == 'pdf_document2') {
+   # do something
+}
+if(getOutputFormat() == 'html_document2') {
+   # do something
+}
 ```
 The basic data I'll be using are stored and loaded from the file *movie_recommendation.RData* `r load(paste(getwd(), "/movie_recommendation.RData", sep =""))`out of the working directory of the present project. The data have been downloaded and prepared according to the instructions and R-code given under the heading "Create train and validation sets" in the course materials, which is reproduced in the box below and also included in the  in the accompanying *movie_recommendation.r* file.
 
@@ -395,12 +416,11 @@ means_by_genres <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_jo
 # Calculate mean by movie-age at the time of rating
 means_by_movie_age <- edx %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(releaseDate, rating_year, title)) %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% group_by(ydiff) %>% summarize(b_a = mean(rating - b_i - b_u - b_g - mu))
 
-# Calculation of predictions in *train*-set
+# Calculation of predictions in *edx*-set
 movie_effect_prediction      <- edx %>% left_join(means_by_movie, by = "movieId") %>% pull(b_i) + mu
 movie_and_user_effect_train  <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% mutate(prediction = mu + b_i + b_u) %>% pull(prediction)
 mov_usr_gen_eff_comb_train   <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate(prediction = mu + b_i + b_u + b_gcomb) %>% pull(prediction)
 mov_usr_gen_eff_train        <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate(prediction = mu + b_i + b_u + b_g) %>% pull(prediction)
-
 mov_usr_gen_eff_age_train    <- edx %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% left_join(means_by_movie_age, by = "ydiff") %>% mutate(prediction = mu + b_i + b_u + b_g + b_a) %>% pull(prediction)
 ```
 
@@ -497,45 +517,76 @@ It can be assumed that some movies with only a few ratings get an overly strong 
 As a formula this can be written as:
 
 $$
-\frac{1}{N}\sum_{u,i,g,a}(y_{u,i,g,a} - \mu - b_i - b_u - b_g - b_a)^2 + \lambda\left(\sum_i b_i^2 + \sum_u b_u^2 + \sum_g b_g^2 + \sum_a b_a^2\right)
+\frac{1}{N}\sum_{u,i,g,a}(y_{u,i,g,a} - \mu - b_i - b_u)^2 + \lambda\left(\sum_i b_i^2 + \sum_u b_u^2\right)
 $$
 
-In the present case a $\lambda$ was picked by cross-validation using a sequence of possible $\lambda$s from `0` to `10` with increasing intervals from `0.05` to `0.25`. From the following graph (Fig. \@ref(fig:plotLambdasVsRMSEs)) it can be seen, however, that using regularization in the context of the present model does *not* contribute to a better prediction. So the final results will be computed without the use of regularization.
+In the present case a $\lambda$ was picked by cross-validation using a sequence of possible $\lambda$s from `0` to `10` with smaller intervals from `4.1` to `5.2`, where the regularization was done with *movie* and *user* variables only. 
 
 ```{r calculation_of_lambda_penalty_terms, message=FALSE, echo=FALSE}
-lambdas <- c(seq(0, 0.5, 0.05), seq(0.55, 1, 0.1), seq(1.25, 5, 0.25))
-train_set <- edx %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate, title))
-test_set <- validation %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate))
+# Test set will be 20% of Edx MovieLens data
+test_index <- createDataPartition(y = edx$rating, times = 1, p = 0.2, list = FALSE)
+set.seed(1) 
+train_set <- edx[test_index,]
+temp <- edx[-test_index,]
+
+# Make sure userId and movieId in test set are also in train set
+test_set <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from test set back into train set
+removed <- anti_join(temp, test_set)
+train_set <- rbind(train_set, removed)
+
+# Add ydiff-field to test set and train_set
+train_set <- train_set %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate, title))
+test_set  <- test_set  %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate))
+rm(removed, test_index)
+
+# possible use of regularization: calcuation and plot of lambda
+lambdas <- c(seq(0, 4, 0.25), seq(4.1, 5.2, 0.1), seq(5.25, 10, 0.25))
+
 mu <- mean(train_set$rating)
 rmses <- sapply(lambdas, function(l){
 	b_i <- train_set %>% group_by(movieId) %>% summarize(b_i = sum(rating - mu)/(n()+l))
 	b_u <- train_set %>% left_join(b_i, by="movieId") %>% group_by(userId) %>% summarize(b_u = sum(rating - b_i - mu)/(n()+l))
-	b_g <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% group_by(genres) %>% summarize(b_g = sum(rating - b_i - b_u - mu)/(n()+l))
-	b_a <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% left_join(b_g, by="genres") %>% group_by(ydiff) %>% summarize(b_a = sum(rating - b_i - b_u - b_g - mu)/n()+l)
+	b_g <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% group_by(genres) %>% summarize(b_g = mean(rating - b_i - b_u - mu))
+	b_a <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% left_join(b_g, by="genres") %>% group_by(ydiff) %>% summarize(b_a = mean(rating - b_i - b_u - b_g - mu))
 
 	predicted_ratings <- test_set %>% 
 	left_join(b_g, by = "genres") %>% left_join(b_i, by = "movieId") %>% left_join(b_u, by = "userId") %>% left_join(b_a, by = "ydiff") %>% 
 	mutate("prediction" = mu + b_i + b_u + b_g + b_a) %>% .$prediction
 
-	return(RMSE(predicted_ratings, test_set$rating))
+	return(RMSE(predicted_ratings, test_set$rating, na.rm=TRUE))
 })
+lambda <- lambdas[which.min(rmses)]
 ```
 ```{r plotLambdasVsRMSEs, message=FALSE, echo=FALSE, cached=FALSE, fig.cap="Plot of $\\lambda$ and RMSE from the present model", out.width = "65%"}
 qplot(x=lambdas, y=rmses, ylab="RSMEs", xlab=unname(TeX("$\\lambda$")))
 ```
 
+From Fig. \@ref(fig:plotLambdasVsRMSEs) it can be seen, that a minimum $lambda$ of `r lambda` can be determined which might increase the accuracy when included in the calculation of the prediction.
+
 # Results
 ```{r calculation_of_predictions_in_test_set, message=FALSE, echo=FALSE, }
+## Calculation of the final model
+b_i <- edx %>% group_by(movieId) %>% summarize(b_i = sum(rating - mu)/(n()+lambda))
+b_u <- edx %>% left_join(b_i, by="movieId") %>% group_by(userId) %>% summarize(b_u = sum(rating - b_i - mu)/(n()+lambda))
+b_g <- edx %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% group_by(genres) %>% summarize(b_g = mean(rating - b_i - b_u - mu))
+b_a <- edx %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% left_join(b_g, by="genres") %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% group_by(ydiff) %>% summarize(b_a = mean(rating - b_i - b_u - b_g - mu))
+
 test_movie_effect_pred    <- validation %>% left_join(means_by_movie, by = "movieId") %>% pull(b_i) + mu
 test_movie_user_pred      <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% mutate(prediction = mu + b_i + b_u) %>% pull(prediction)
 test_mov_usr_gen_pred     <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate(prediction = mu + b_i + b_u + b_g) %>% pull(prediction)
 test_mov_usr_gen_age_pred <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% left_join(means_by_movie_age, by = "ydiff") %>% mutate(prediction = mu + b_i + b_u + b_g + b_a) %>% pull(prediction)
+test_mov_usr_gen_age_p_reg <- validation %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% left_join(b_g, by = "genres") %>% left_join(b_i, by = "movieId") %>% left_join(b_u, by = "userId") %>% left_join(b_a, by = "ydiff") %>% mutate("prediction" = mu + b_i + b_u + b_g + b_a) %>% .$prediction
 
-test_pred_res <- data.frame(                 "prediction model"="overall mean",                               "RMSE" = formatC(RMSE(mean(edx$rating), validation$rating)         , format="f", digits=5)  )
-test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie effects",                              "RMSE" = formatC(RMSE(test_movie_effect_pred, validation$rating)   , format="f", digits=5) ))
-test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie and user effects",                     "RMSE" = formatC(RMSE(test_movie_user_pred, validation$rating)     , format="f", digits=5) ))
-test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, and genres effects",            "RMSE" = formatC(RMSE(test_mov_usr_gen_pred, validation$rating)    , format="f", digits=5) ))
-test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, genres, and movie age effects", "RMSE" = formatC(RMSE(test_mov_usr_gen_age_pred, validation$rating), format="f", digits=5) ))
+test_pred_res <- data.frame(                 "prediction model"="overall mean",                               "RMSE" = formatC(RMSE(mean(edx$rating), validation$rating, na.rm=TRUE)         , format="f", digits=5)  )
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie effects",                              "RMSE" = formatC(RMSE(test_movie_effect_pred, validation$rating, na.rm=TRUE)   , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie and user effects",                     "RMSE" = formatC(RMSE(test_movie_user_pred, validation$rating, na.rm=TRUE)     , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, and genres effects",            "RMSE" = formatC(RMSE(test_mov_usr_gen_pred, validation$rating, na.rm=TRUE)    , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, genres, and movie age effects", "RMSE" = formatC(RMSE(test_mov_usr_gen_age_pred, validation$rating, na.rm=TRUE), format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="reularized movie & user plus genres & movie age effects", "RMSE" = formatC(RMSE(test_mov_usr_gen_age_p_reg, validation$rating, na.rm=TRUE), format="f", digits=5) ))
 ```
 
 The results of predictions using the present modeling approach (see \@ref(modeling-approach)) are presented in the below table:
@@ -543,11 +594,13 @@ The results of predictions using the present modeling approach (see \@ref(modeli
 ```{r TableOfPredictionsInTestSet, message=FALSE, echo=FALSE}
 kbl(test_pred_res, booktabs = T, caption = "Results of predictions in the validation-data set") %>% kable_styling(latex_options = c("HOLD_position"), full_width = TRUE)
 ```
-The final result of using *movie*, *user*, combination of *genres* for movies, and *age of movie* at the time of rating results in the RMSE = **`r formatC(RMSE(test_mov_usr_gen_age_pred, validation$rating), format="f", digits=5)`**, which in the context of the present task seems acceptable.
+The final result of using *movie*, *user*, combination of *genres* for movies, and *age of movie* at the time of rating results in the RMSE = **`r formatC(data.table::last(test_pred_res$RMSE), format="f", digits=5)`**, which in the context of the present task seems acceptable.
 
 \newpage
 
 # Concluding Remarks
 
-While the first estimate using only the overall mean resulted in an RSME larger than 1.0, the final model resulted in a RMSE that was improved approx. 18.5 %. The regularization in the present model did not add to the accuracy of prediction and thus was not used in the calculation of fonal results. 
+While the first estimate using only the overall mean resulted in an RSME larger than 1.0, the final model resulted in a RMSE that was improved approx. `r formatC((as.numeric(data.table::first(test_pred_res$RMSE)) - as.numeric(data.table::last(test_pred_res$RMSE))) * 100, format="f", digits=1)` %. Further methods could maybe be applied, like matrix factorization to get to even better results, that anyway weren't aimed at in the context of the present task.
+
+
 

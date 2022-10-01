@@ -261,45 +261,79 @@ edx %>% group_by(userId) %>% summarize(b_u = mean(rating)) %>% ggplot(aes(b_u)) 
 qplot(x=mean_g, y=m_gcomb, data=means_by_genres, ylab=unname(TeX("$m_{g(comb)}$")), xlab=unname(TeX("$m_g$")))+ geom_point(size=1.0)
 
 ##########################################################
+#  Test set will be 20% of Edx MovieLens data
+##########################################################
+test_index <- createDataPartition(y = edx$rating, times = 1, p = 0.2, list = FALSE)
+set.seed(1) 
+train_set <- edx[test_index,]
+temp <- edx[-test_index,]
+
+##########################################################
+# Make sure userId and movieId in test set are also in train set
+##########################################################
+test_set <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+##########################################################
+# Add rows removed from test set back into train set
+##########################################################
+removed <- anti_join(temp, test_set)
+train_set <- rbind(train_set, removed)
+
+##########################################################
+# Add ydiff-field to test set and train_set
+##########################################################
+train_set <- train_set %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate, title))
+test_set  <- test_set %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate))
+
+##########################################################
 # possible use of regularization: calcuation and plot of lambda
 ##########################################################
-lambdas <- c(seq(0, 0.5, 0.05), seq(0.55, 1, 0.1), seq(1.25, 5, 0.25))
-train_set <- edx %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate, title))
-test_set <- validation %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff = ifelse(ydiff < 0, 0, ydiff)) %>% select(-c(rating_year, releaseDate))
+lambdas <- c(seq(0, 4, 0.25), seq(4.1, 5.2, 0.1), seq(5.25, 10, 0.25))
+
 mu <- mean(train_set$rating)
 rmses <- sapply(lambdas, function(l){
 	b_i <- train_set %>% group_by(movieId) %>% summarize(b_i = sum(rating - mu)/(n()+l))
 	b_u <- train_set %>% left_join(b_i, by="movieId") %>% group_by(userId) %>% summarize(b_u = sum(rating - b_i - mu)/(n()+l))
-	b_g <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% group_by(genres) %>% summarize(b_g = sum(rating - b_i - b_u - mu)/(n()+l))
-	b_a <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% left_join(b_g, by="genres") %>% group_by(ydiff) %>% summarize(b_a = sum(rating - b_i - b_u - b_g - mu)/n()+l)
+	b_g <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% group_by(genres) %>% summarize(b_g = mean(rating - b_i - b_u - mu))
+	b_a <- train_set %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% left_join(b_g, by="genres") %>% group_by(ydiff) %>% summarize(b_a = mean(rating - b_i - b_u - b_g - mu))
 
 	predicted_ratings <- test_set %>% 
 	left_join(b_g, by = "genres") %>% left_join(b_i, by = "movieId") %>% left_join(b_u, by = "userId") %>% left_join(b_a, by = "ydiff") %>% 
 	mutate("prediction" = mu + b_i + b_u + b_g + b_a) %>% .$prediction
 
-	return(RMSE(predicted_ratings, test_set$rating))
+	return(RMSE(predicted_ratings, test_set$rating, na.rm=TRUE))
 })
+lambda <- lambdas[which.min(rmses)]
 
 qplot(x=lambdas, y=rmses, ylab="RSMEs", xlab=unname(TeX("$\\lambda$")))
 
 ##########################################################
-# results from the model: predictions in the validation- (test-) data set
+# Calculation of the final model
 ##########################################################
 # calculation of predictions
 ##########################################################
+test_movie_effect_pred    <- valb_i <- edx %>% group_by(movieId) %>% summarize(b_i = sum(rating - mu)/(n()+lambda))
+b_u <- edx %>% left_join(b_i, by="movieId") %>% group_by(userId) %>% summarize(b_u = sum(rating - b_i - mu)/(n()+lambda))
+b_g <- edx %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% group_by(genres) %>% summarize(b_g = mean(rating - b_i - b_u - mu))
+b_a <- edx %>% left_join(b_i, by="movieId") %>% left_join(b_u, by="userId") %>% left_join(b_g, by="genres") %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% group_by(ydiff) %>% summarize(b_a = mean(rating - b_i - b_u - b_g - mu))
+
 test_movie_effect_pred    <- validation %>% left_join(means_by_movie, by = "movieId") %>% pull(b_i) + mu
 test_movie_user_pred      <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% mutate(prediction = mu + b_i + b_u) %>% pull(prediction)
 test_mov_usr_gen_pred     <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate(prediction = mu + b_i + b_u + b_g) %>% pull(prediction)
 test_mov_usr_gen_age_pred <- validation %>% left_join(means_by_movie, by = "movieId") %>% left_join(means_by_user, by = "userId") %>% left_join(means_by_genres, by = "genres") %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% left_join(means_by_movie_age, by = "ydiff") %>% mutate(prediction = mu + b_i + b_u + b_g + b_a) %>% pull(prediction)
+test_mov_usr_gen_age_p_reg <- validation %>% mutate("releaseDate"= (str_extract(.$title, "\\(\\d{4}\\)") %>% str_extract("\\d{4}") %>% as.numeric()))%>% mutate("rating_year" = as.numeric(substr(as_datetime(timestamp),1,4))) %>% mutate("ydiff"= rating_year - releaseDate) %>% mutate(ydiff=replace(ydiff, ydiff < 0, 0)) %>% left_join(b_g, by = "genres") %>% left_join(b_i, by = "movieId") %>% left_join(b_u, by = "userId") %>% left_join(b_a, by = "ydiff") %>% mutate("prediction" = mu + b_i + b_u + b_g + b_a) %>% .$prediction
 
 ##########################################################
 # testing the predictions
 ##########################################################
-test_pred_res <- data.frame(                 "prediction model"="overall mean",                               "RMSE" = formatC(RMSE(mean(edx$rating), validation$rating)         , format="f", digits=5)  )
-test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie effects",                              "RMSE" = formatC(RMSE(test_movie_effect_pred, validation$rating)   , format="f", digits=5) ))
-test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie and user effects",                     "RMSE" = formatC(RMSE(test_movie_user_pred, validation$rating)     , format="f", digits=5) ))
-test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, and genres effects",            "RMSE" = formatC(RMSE(test_mov_usr_gen_pred, validation$rating)    , format="f", digits=5) ))
-test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, genres, and movie age effects", "RMSE" = formatC(RMSE(test_mov_usr_gen_age_pred, validation$rating), format="f", digits=5) ))
+test_pred_res <- data.frame(                 "prediction model"="overall mean",                               "RMSE" = formatC(RMSE(mean(edx$rating), validation$rating, na.rm=TRUE)         , format="f", digits=5)  )
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie effects",                              "RMSE" = formatC(RMSE(test_movie_effect_pred, validation$rating, na.rm=TRUE)   , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie and user effects",                     "RMSE" = formatC(RMSE(test_movie_user_pred, validation$rating, na.rm=TRUE)     , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, and genres effects",            "RMSE" = formatC(RMSE(test_mov_usr_gen_pred, validation$rating, na.rm=TRUE)    , format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="movie, user, genres, and movie age effects", "RMSE" = formatC(RMSE(test_mov_usr_gen_age_pred, validation$rating, na.rm=TRUE), format="f", digits=5) ))
+test_pred_res <- rbind(test_pred_res,      c("prediction model"="reularized movie & user plus genres & movie age effects", "RMSE" = formatC(RMSE(test_mov_usr_gen_age_p_reg, validation$rating, na.rm=TRUE), format="f", digits=5) ))
 
 ##########################################################
 # showing the results as a table
